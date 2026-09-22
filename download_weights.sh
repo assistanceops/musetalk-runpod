@@ -10,7 +10,7 @@ mkdir -p models/musetalkV15 models/dwpose models/face-parse-bisent models/sd-vae
 export HF_ENDPOINT="${HF_ENDPOINT:-https://huggingface.co}"
 
 # Download pinned runtime artifacts without depending on a CLI version.
-python - <<'PY'
+python3.10 - <<'PY'
 from huggingface_hub import snapshot_download
 
 snapshot_download(
