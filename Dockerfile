@@ -22,8 +22,11 @@ RUN python3.10 -m pip install --upgrade pip setuptools wheel \
         torch==2.0.1 torchvision==0.15.2 torchaudio==2.0.2 \
         --index-url https://download.pytorch.org/whl/cu118 \
     && python3.10 -m pip install -r requirements-inference.txt -r requirements-serverless.txt \
-    && python3.10 -m pip install -U openmim \
-    && mim install "mmengine==0.10.7" "mmcv==2.0.1" "mmdet==3.1.0" "mmpose==1.1.0"
+    && python3.10 -m pip install --no-build-isolation "chumpy==0.70" \
+    && python3.10 -m pip install \
+        "mmengine==0.10.7" "mmcv==2.0.1" "mmdet==3.1.0" "mmpose==1.1.0" \
+        --find-links https://download.openmmlab.com/mmcv/dist/cu118/torch2.0.0/index.html \
+    && python3.10 -m pip check
 
 COPY . .
 
