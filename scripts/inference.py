@@ -28,7 +28,46 @@ def fast_check_ffmpeg():
         return False
 
 @torch.no_grad()
-def main(args):
+def load_runtime(args):
+    """Load the expensive model stack once per Serverless worker."""
+    device = torch.device(f"cuda:{args.gpu_id}" if torch.cuda.is_available() else "cpu")
+    vae, unet, pe = load_all_model(
+        unet_model_path=args.unet_model_path,
+        vae_type=args.vae_type,
+        unet_config=args.unet_config,
+        device=device,
+    )
+    if args.use_float16 and torch.cuda.is_available():
+        pe = pe.half()
+        vae.vae = vae.vae.half()
+        unet.model = unet.model.half()
+    pe = pe.to(device)
+    vae.vae = vae.vae.to(device)
+    unet.model = unet.model.to(device)
+    audio_processor = AudioProcessor(feature_extractor_path=args.whisper_dir)
+    weight_dtype = unet.model.dtype
+    whisper = WhisperModel.from_pretrained(args.whisper_dir)
+    whisper = whisper.to(device=device, dtype=weight_dtype).eval()
+    whisper.requires_grad_(False)
+    fp = FaceParsing(
+        left_cheek_width=args.left_cheek_width,
+        right_cheek_width=args.right_cheek_width,
+    ) if args.version == "v15" else FaceParsing()
+    return {
+        "device": device,
+        "vae": vae,
+        "unet": unet,
+        "pe": pe,
+        "timesteps": torch.tensor([0], device=device),
+        "audio_processor": audio_processor,
+        "weight_dtype": weight_dtype,
+        "whisper": whisper,
+        "fp": fp,
+    }
+
+
+@torch.no_grad()
+def main(args, runtime=None):
     # Configure ffmpeg path
     if not fast_check_ffmpeg():
         print("Adding ffmpeg to PATH")
@@ -38,48 +77,22 @@ def main(args):
         if not fast_check_ffmpeg():
             print("Warning: Unable to find ffmpeg, please ensure ffmpeg is properly installed")
     
-    # Set computing device
-    device = torch.device(f"cuda:{args.gpu_id}" if torch.cuda.is_available() else "cpu")
-    # Load model weights
-    vae, unet, pe = load_all_model(
-        unet_model_path=args.unet_model_path, 
-        vae_type=args.vae_type,
-        unet_config=args.unet_config,
-        device=device
-    )
-    timesteps = torch.tensor([0], device=device)
-
-    # Convert models to half precision if float16 is enabled
-    if args.use_float16:
-        pe = pe.half()
-        vae.vae = vae.vae.half()
-        unet.model = unet.model.half()
-    
-    # Move models to specified device
-    pe = pe.to(device)
-    vae.vae = vae.vae.to(device)
-    unet.model = unet.model.to(device)
-        
-    # Initialize audio processor and Whisper model
-    audio_processor = AudioProcessor(feature_extractor_path=args.whisper_dir)
-    weight_dtype = unet.model.dtype
-    whisper = WhisperModel.from_pretrained(args.whisper_dir)
-    whisper = whisper.to(device=device, dtype=weight_dtype).eval()
-    whisper.requires_grad_(False)
-    
-    # Initialize face parser with configurable parameters based on version
-    if args.version == "v15":
-        fp = FaceParsing(
-            left_cheek_width=args.left_cheek_width,
-            right_cheek_width=args.right_cheek_width
-        )
-    else:  # v1
-        fp = FaceParsing()
+    runtime = runtime or load_runtime(args)
+    device = runtime["device"]
+    vae = runtime["vae"]
+    unet = runtime["unet"]
+    pe = runtime["pe"]
+    timesteps = runtime["timesteps"]
+    audio_processor = runtime["audio_processor"]
+    weight_dtype = runtime["weight_dtype"]
+    whisper = runtime["whisper"]
+    fp = runtime["fp"]
     
     # Load inference configuration
     inference_config = OmegaConf.load(args.inference_config)
     print("Loaded inference config:", inference_config)
     
+    outputs = []
     # Process each task
     for task_id in inference_config:
         try:
@@ -116,12 +129,15 @@ def main(args):
                 output_vid_name = os.path.join(temp_dir, args.output_vid_name)
             output_vid_name_concat = os.path.join(temp_dir, output_basename + "_concat.mp4")
             
+            save_dir_full = None
             # Extract frames from source video
             if get_file_type(video_path) == "video":
                 save_dir_full = os.path.join(temp_dir, input_basename)
                 os.makedirs(save_dir_full, exist_ok=True)
-                cmd = f"ffmpeg -v fatal -i {video_path} -start_number 0 {save_dir_full}/%08d.png"
-                os.system(cmd)
+                subprocess.run(
+                    ["ffmpeg", "-v", "fatal", "-i", video_path, "-start_number", "0", f"{save_dir_full}/%08d.png"],
+                    check=True,
+                )
                 input_img_list = sorted(glob.glob(os.path.join(save_dir_full, '*.[jpJP][pnPN]*[gG]')))
                 fps = get_video_fps(video_path)
             elif get_file_type(video_path) == "image":
@@ -197,8 +213,8 @@ def main(args):
             
             # Execute inference
             for i, (whisper_batch, latent_batch) in enumerate(tqdm(gen, total=total)):
-                audio_feature_batch = pe(whisper_batch)
-                latent_batch = latent_batch.to(dtype=unet.model.dtype)
+                audio_feature_batch = pe(whisper_batch.to(device))
+                latent_batch = latent_batch.to(device=device, dtype=unet.model.dtype)
                 
                 pred_latents = unet.model(latent_batch, timesteps, encoder_hidden_states=audio_feature_batch).sample
                 recon = vae.decode_latents(pred_latents)
@@ -228,25 +244,31 @@ def main(args):
 
             # Save prediction results
             temp_vid_path = f"{temp_dir}/temp_{input_basename}_{audio_basename}.mp4"
-            cmd_img2video = f"ffmpeg -y -v warning -r {fps} -f image2 -i {result_img_save_path}/%08d.png -vcodec libx264 -vf format=yuv420p -crf 18 {temp_vid_path}"
-            print("Video generation command:", cmd_img2video)
-            os.system(cmd_img2video)   
+            subprocess.run(
+                ["ffmpeg", "-y", "-v", "warning", "-r", str(fps), "-f", "image2", "-i", f"{result_img_save_path}/%08d.png", "-vcodec", "libx264", "-vf", "format=yuv420p", "-crf", "18", temp_vid_path],
+                check=True,
+            )
             
-            cmd_combine_audio = f"ffmpeg -y -v warning -i {audio_path} -i {temp_vid_path} {output_vid_name}"
-            print("Audio combination command:", cmd_combine_audio) 
-            os.system(cmd_combine_audio)
+            subprocess.run(
+                ["ffmpeg", "-y", "-v", "warning", "-i", audio_path, "-i", temp_vid_path, "-shortest", output_vid_name],
+                check=True,
+            )
             
             # Clean up temporary files
             shutil.rmtree(result_img_save_path)
             os.remove(temp_vid_path)
             
-            shutil.rmtree(save_dir_full)
-            if not args.saved_coord:
+            if save_dir_full:
+                shutil.rmtree(save_dir_full)
+            if not args.saved_coord and os.path.exists(crop_coord_save_path):
                 os.remove(crop_coord_save_path)
                     
             print(f"Results saved to {output_vid_name}")
+            outputs.append(output_vid_name)
         except Exception as e:
             print("Error occurred during processing:", e)
+            raise
+    return outputs
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

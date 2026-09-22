@@ -1,0 +1,9 @@
+{
+  "input": {
+    "video_url": "https://example.com/avatar.mp4",
+    "audio_url": "https://example.com/speech.wav",
+    "output_format": "auto",
+    "batch_size": 8,
+    "fps": 25
+  }
+}

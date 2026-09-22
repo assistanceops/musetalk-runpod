@@ -4,19 +4,14 @@
 CheckpointsDir="models"
 
 # Create necessary directories
-mkdir -p models/musetalk models/musetalkV15 models/syncnet models/dwpose models/face-parse-bisent models/sd-vae models/whisper
+mkdir -p models/musetalkV15 models/dwpose models/face-parse-bisent models/sd-vae models/whisper
 
 # Install required packages
 pip install -U "huggingface_hub[cli]"
 pip install gdown
 
-# Set HuggingFace mirror endpoint
-export HF_ENDPOINT=https://hf-mirror.com
-
-# Download MuseTalk V1.0 weights
-huggingface-cli download TMElyralab/MuseTalk \
-  --local-dir $CheckpointsDir \
-  --include "musetalk/musetalk.json" "musetalk/pytorch_model.bin"
+# Use the official Hugging Face endpoint unless the builder explicitly overrides it.
+export HF_ENDPOINT="${HF_ENDPOINT:-https://huggingface.co}"
 
 # Download MuseTalk V1.5 weights (unet.pth)
 huggingface-cli download TMElyralab/MuseTalk \
@@ -37,11 +32,6 @@ huggingface-cli download openai/whisper-tiny \
 huggingface-cli download yzd-v/DWPose \
   --local-dir $CheckpointsDir/dwpose \
   --include "dw-ll_ucoco_384.pth"
-
-# Download SyncNet weights
-huggingface-cli download ByteDance/LatentSync \
-  --local-dir $CheckpointsDir/syncnet \
-  --include "latentsync_syncnet.pt"
 
 # Download Face Parse Bisent weights
 gdown --id 154JgKpzCPW82qINcVieuPH3fZ2e0P812 -O $CheckpointsDir/face-parse-bisent/79999_iter.pth
