@@ -6,32 +6,34 @@ CheckpointsDir="models"
 # Create necessary directories
 mkdir -p models/musetalkV15 models/dwpose models/face-parse-bisent models/sd-vae models/whisper
 
-# Install required packages
-pip install -U "huggingface_hub[cli]"
-pip install gdown
-
 # Use the official Hugging Face endpoint unless the builder explicitly overrides it.
 export HF_ENDPOINT="${HF_ENDPOINT:-https://huggingface.co}"
 
-# Download MuseTalk V1.5 weights (unet.pth)
-huggingface-cli download TMElyralab/MuseTalk \
-  --local-dir $CheckpointsDir \
-  --include "musetalkV15/musetalk.json" "musetalkV15/unet.pth"
+# Download pinned runtime artifacts without depending on a CLI version.
+python - <<'PY'
+from huggingface_hub import snapshot_download
 
-# Download SD VAE weights
-huggingface-cli download stabilityai/sd-vae-ft-mse \
-  --local-dir $CheckpointsDir/sd-vae \
-  --include "config.json" "diffusion_pytorch_model.bin"
-
-# Download Whisper weights
-huggingface-cli download openai/whisper-tiny \
-  --local-dir $CheckpointsDir/whisper \
-  --include "config.json" "pytorch_model.bin" "preprocessor_config.json"
-
-# Download DWPose weights
-huggingface-cli download yzd-v/DWPose \
-  --local-dir $CheckpointsDir/dwpose \
-  --include "dw-ll_ucoco_384.pth"
+snapshot_download(
+    repo_id="TMElyralab/MuseTalk",
+    local_dir="models",
+    allow_patterns=["musetalkV15/musetalk.json", "musetalkV15/unet.pth"],
+)
+snapshot_download(
+    repo_id="stabilityai/sd-vae-ft-mse",
+    local_dir="models/sd-vae",
+    allow_patterns=["config.json", "diffusion_pytorch_model.bin"],
+)
+snapshot_download(
+    repo_id="openai/whisper-tiny",
+    local_dir="models/whisper",
+    allow_patterns=["config.json", "pytorch_model.bin", "preprocessor_config.json"],
+)
+snapshot_download(
+    repo_id="yzd-v/DWPose",
+    local_dir="models/dwpose",
+    allow_patterns=["dw-ll_ucoco_384.pth"],
+)
+PY
 
 # Download Face Parse Bisent weights
 gdown --id 154JgKpzCPW82qINcVieuPH3fZ2e0P812 -O $CheckpointsDir/face-parse-bisent/79999_iter.pth
