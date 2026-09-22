@@ -1,5 +1,9 @@
 FROM nvidia/cuda:11.8.0-cudnn8-runtime-ubuntu22.04
 
+LABEL org.opencontainers.image.source="https://github.com/hundevmode/musetalk-runpod" \
+      org.opencontainers.image.description="MuseTalk 1.5 worker for RunPod Serverless" \
+      org.opencontainers.image.licenses="MIT"
+
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \

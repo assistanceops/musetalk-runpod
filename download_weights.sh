@@ -38,4 +38,8 @@ gdown --id 154JgKpzCPW82qINcVieuPH3fZ2e0P812 -O $CheckpointsDir/face-parse-bisen
 curl -L https://download.pytorch.org/models/resnet18-5c106cde.pth \
   -o $CheckpointsDir/face-parse-bisent/resnet18-5c106cde.pth
 
+# Face detector weight otherwise fetched during the first cold start.
+curl -L https://www.adrianbulat.com/downloads/python-fan/s3fd-619a316812.pth \
+  -o musetalk/utils/face_detection/detection/sfd/s3fd.pth
+
 echo "✅ All weights have been downloaded successfully!" 
