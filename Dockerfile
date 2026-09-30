@@ -1,4 +1,4 @@
-FROM nvidia/cuda:12.1.0-cudnn8-runtime-ubuntu22.04
+FROM nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04
 
 LABEL org.opencontainers.image.source="https://github.com/hundevmode/musetalk-runpod" \
       org.opencontainers.image.description="MuseTalk 1.5 worker for RunPod Serverless" \
@@ -23,8 +23,15 @@ RUN python3.10 -m pip install --upgrade pip setuptools wheel \
         --index-url https://download.pytorch.org/whl/cu121 \
     && python3.10 -m pip install -r requirements-inference.txt -r requirements-serverless.txt \
     && python3.10 -m pip install --no-build-isolation "chumpy==0.70" \
+    # mmcv==2.1.0 is the only prebuilt wheel OpenMMLab publishes for
+    # cu121/torch2.1 (no <2.1.0 build exists there) — mmdet==3.1.0's own
+    # compat gate required mmcv strictly <2.1.0 and crashed on import
+    # inside mmpose.apis. mmdet>=3.2.0 raised that ceiling to <2.2.0, so
+    # mmcv==2.1.0 passes; mmpose==1.1.0's own gate already allows <=2.1.0.
+    # Keep this trio pinned together — don't bump mmcv without re-checking
+    # both mmdet's and mmpose's mmcv_maximum_version.
     && python3.10 -m pip install \
-        "mmengine==0.10.7" "mmcv==2.1.0" "mmdet==3.1.0" "mmpose==1.1.0" \
+        "mmengine==0.10.7" "mmcv==2.1.0" "mmdet==3.3.0" "mmpose==1.1.0" \
         --find-links https://download.openmmlab.com/mmcv/dist/cu121/torch2.1/index.html \
     && python3.10 -m pip check
 COPY . .
